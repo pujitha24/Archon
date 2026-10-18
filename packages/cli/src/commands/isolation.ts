@@ -382,64 +382,93 @@ export async function isolationCompleteCommand(
       }
 
       // Check 5: unpushed commits and remote-deleted branches.
+      // Whether the remote ref exists comes from the exit status of `rev-parse
+      // --verify --quiet` (1 = absent), never from git's message, which varies by
+      // version and locale. Any other probe failure falls through to `git log`, whose
+      // own failure blocks when unique commits exist.
+      let remoteRefMissing = false;
       try {
-        const unpushedResult = await execFileAsync(
+        await execFileAsync(
           'git',
-          ['-C', env.codebase_default_cwd, 'log', `${remote}/${branch}..${branch}`, '--oneline'],
+          [
+            '-C',
+            env.codebase_default_cwd,
+            'rev-parse',
+            '--verify',
+            '--quiet',
+            `refs/remotes/${remote}/${branch}`,
+          ],
           { timeout: 15000 }
         );
-        const unpushedLines = unpushedResult.stdout.trim().split('\n').filter(Boolean);
-        if (unpushedLines.length > 0) {
-          blockers.push(`${unpushedLines.length} commit(s) not pushed to remote`);
-        }
-        if (uniqueCommitCount !== undefined && uniqueCommitCount > 0) {
-          blockers.push(`${String(uniqueCommitCount)} commit(s) unique to this branch`);
-        }
       } catch (error) {
-        const err = error as Error;
-        // git gives the same "unknown revision" for a ref GitHub deleted after a
-        // squash merge and for one that was never pushed. The safety decision is the
-        // same either way — is the content on the base? — but the operator's message
-        // must not assert a deletion that may never have happened.
-        if (err.message.includes('unknown revision') || err.message.includes('bad revision')) {
-          if (uniqueCommitCount !== undefined && uniqueCommitCount > 0) {
-            try {
-              const configuredBase = repoConfig?.worktree?.baseBranch?.trim();
-              const baseBranch = configuredBase
-                ? toBranchName(configuredBase)
-                : await getDefaultBranch(toRepoPath(env.codebase_default_cwd), remote);
-              const remoteBaseRef = `${remote}/${baseBranch}`;
-              if (
-                await isPatchEquivalent(
-                  toRepoPath(env.codebase_default_cwd),
-                  toBranchName(branch),
-                  remoteBaseRef,
-                  { throwOnExpectedError: true }
-                )
-              ) {
-                console.log(
-                  `  Note: no ${remote}/${branch} on the remote; content is already on ` +
-                    `${remoteBaseRef} (squash-merged, or merged locally and never pushed).`
-                );
-              } else {
-                blockers.push(
-                  `no ${remote}/${branch} on the remote (deleted or never pushed) ` +
-                    `and content not found on ${remoteBaseRef}`
-                );
-              }
-            } catch (patchCheckError) {
-              const patchCheckErr = patchCheckError as Error;
-              getLog().warn(
-                { err: patchCheckErr, branch },
-                'isolation.complete_remote_deleted_branch_check_failed'
+        if ((error as { code?: unknown }).code === 1) {
+          remoteRefMissing = true;
+        } else {
+          getLog().warn(
+            { err: error as Error, branch },
+            'isolation.complete_remote_ref_probe_failed'
+          );
+        }
+      }
+
+      if (remoteRefMissing) {
+        // git cannot tell a ref GitHub deleted after a squash merge from one that was
+        // never pushed. The safety decision is the same either way — is the content on
+        // the base? — but the operator's message must not assert a deletion that may
+        // never have happened.
+        if (uniqueCommitCount !== undefined && uniqueCommitCount > 0) {
+          try {
+            const configuredBase = repoConfig?.worktree?.baseBranch?.trim();
+            const baseBranch = configuredBase
+              ? toBranchName(configuredBase)
+              : await getDefaultBranch(toRepoPath(env.codebase_default_cwd), remote);
+            const remoteBaseRef = `${remote}/${baseBranch}`;
+            if (
+              await isPatchEquivalent(
+                toRepoPath(env.codebase_default_cwd),
+                toBranchName(branch),
+                remoteBaseRef,
+                { throwOnExpectedError: true }
+              )
+            ) {
+              console.log(
+                `  Note: no ${remote}/${branch} on the remote; content is already on ` +
+                  `${remoteBaseRef} (squash-merged, or merged locally and never pushed).`
               );
+            } else {
               blockers.push(
-                `could not verify whether ${branch}'s content is already on the base branch ` +
-                  `(${patchCheckErr.message})`
+                `no ${remote}/${branch} on the remote (deleted or never pushed) ` +
+                  `and content not found on ${remoteBaseRef}`
               );
             }
+          } catch (patchCheckError) {
+            const patchCheckErr = patchCheckError as Error;
+            getLog().warn(
+              { err: patchCheckErr, branch },
+              'isolation.complete_remote_deleted_branch_check_failed'
+            );
+            blockers.push(
+              `could not verify whether ${branch}'s content is already on the base branch ` +
+                `(${patchCheckErr.message})`
+            );
           }
-        } else {
+        }
+      } else {
+        try {
+          const unpushedResult = await execFileAsync(
+            'git',
+            ['-C', env.codebase_default_cwd, 'log', `${remote}/${branch}..${branch}`, '--oneline'],
+            { timeout: 15000 }
+          );
+          const unpushedLines = unpushedResult.stdout.trim().split('\n').filter(Boolean);
+          if (unpushedLines.length > 0) {
+            blockers.push(`${unpushedLines.length} commit(s) not pushed to remote`);
+          }
+          if (uniqueCommitCount !== undefined && uniqueCommitCount > 0) {
+            blockers.push(`${String(uniqueCommitCount)} commit(s) unique to this branch`);
+          }
+        } catch (error) {
+          const err = error as Error;
           if (uniqueCommitCount !== undefined && uniqueCommitCount > 0) {
             blockers.push(`${String(uniqueCommitCount)} commit(s) unique to this branch`);
           }

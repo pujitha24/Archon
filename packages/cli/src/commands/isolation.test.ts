@@ -455,8 +455,8 @@ describe('isolationCompleteCommand', () => {
       if (cmd === 'gh') {
         return Promise.resolve({ stdout: '[]', stderr: '' });
       }
-      if (cmd === 'git' && args.some((a: string) => a.startsWith('origin/'))) {
-        return Promise.reject(new Error('fatal: unknown revision origin/feature-branch'));
+      if (cmd === 'git' && args.includes('rev-parse')) {
+        return Promise.reject(Object.assign(new Error('exit 1'), { code: 1 }));
       }
       return Promise.resolve({ stdout: '', stderr: '' });
     });
@@ -488,8 +488,8 @@ describe('isolationCompleteCommand', () => {
       if (cmd === 'gh') {
         return Promise.resolve({ stdout: '[]', stderr: '' });
       }
-      if (cmd === 'git' && args.some((a: string) => a.startsWith('origin/'))) {
-        return Promise.reject(new Error('fatal: unknown revision origin/feature-branch'));
+      if (cmd === 'git' && args.includes('rev-parse')) {
+        return Promise.reject(Object.assign(new Error('exit 1'), { code: 1 }));
       }
       return Promise.resolve({ stdout: '', stderr: '' });
     });
@@ -529,6 +529,32 @@ describe('isolationCompleteCommand', () => {
     expect(mockIsPatchEquivalent).not.toHaveBeenCalled();
   });
 
+  it('does not treat a failed remote-ref probe as a missing ref', async () => {
+    mockFindActiveByBranchName.mockResolvedValueOnce(mockEnv);
+    mockGetUniqueCommitCount.mockResolvedValueOnce(1);
+    mockIsPatchEquivalent.mockResolvedValue(true);
+    mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === 'gh') {
+        return Promise.resolve({ stdout: '[]', stderr: '' });
+      }
+      if (cmd === 'git' && args.includes('rev-parse')) {
+        return Promise.reject(
+          Object.assign(new Error('fatal: not a git repository'), { code: 128 })
+        );
+      }
+      if (cmd === 'git' && args.includes('log')) {
+        return Promise.reject(new Error('fatal: not a git repository'));
+      }
+      return Promise.resolve({ stdout: '', stderr: '' });
+    });
+
+    await isolationCompleteCommand(['feature-branch'], { force: false, deleteRemote: true });
+
+    expect(mockRemoveEnvironment).not.toHaveBeenCalled();
+    expect(consoleErrorSpy).toHaveBeenCalledWith('    ✗ 1 commit(s) unique to this branch');
+    expect(mockIsPatchEquivalent).not.toHaveBeenCalled();
+  });
+
   it('blocks when the remote default branch cannot be verified', async () => {
     mockFindActiveByBranchName.mockResolvedValueOnce(mockEnv);
     mockGetUniqueCommitCount.mockResolvedValueOnce(1);
@@ -537,8 +563,8 @@ describe('isolationCompleteCommand', () => {
       if (cmd === 'gh') {
         return Promise.resolve({ stdout: '[]', stderr: '' });
       }
-      if (cmd === 'git' && args.some((a: string) => a.startsWith('origin/'))) {
-        return Promise.reject(new Error('fatal: unknown revision origin/feature-branch'));
+      if (cmd === 'git' && args.includes('rev-parse')) {
+        return Promise.reject(Object.assign(new Error('exit 1'), { code: 1 }));
       }
       return Promise.resolve({ stdout: '', stderr: '' });
     });
@@ -568,8 +594,8 @@ describe('isolationCompleteCommand', () => {
       if (cmd === 'gh') {
         return Promise.resolve({ stdout: '[]', stderr: '' });
       }
-      if (cmd === 'git' && args.some((a: string) => a.startsWith('origin/'))) {
-        return Promise.reject(new Error('fatal: unknown revision origin/feature-branch'));
+      if (cmd === 'git' && args.includes('rev-parse')) {
+        return Promise.reject(Object.assign(new Error('exit 1'), { code: 1 }));
       }
       return Promise.resolve({ stdout: '', stderr: '' });
     });
@@ -600,8 +626,8 @@ describe('isolationCompleteCommand', () => {
       if (cmd === 'gh') {
         return Promise.resolve({ stdout: '[]', stderr: '' });
       }
-      if (cmd === 'git' && args.some((a: string) => a.startsWith('origin/'))) {
-        return Promise.reject(new Error('fatal: unknown revision origin/feature-branch'));
+      if (cmd === 'git' && args.includes('rev-parse')) {
+        return Promise.reject(Object.assign(new Error('exit 1'), { code: 1 }));
       }
       return Promise.resolve({ stdout: '', stderr: '' });
     });
